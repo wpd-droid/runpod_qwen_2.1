@@ -11,7 +11,6 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_INPUT=1 \
     PYTHONUNBUFFERED=1
 
-
 # ------------------------------------------------------------
 # RTX 4090 / Ada compile settings
 # ------------------------------------------------------------
@@ -23,9 +22,8 @@ ENV TORCH_CUDA_ARCH_LIST="8.9" \
     CUDA_HOME="/usr/local/cuda" \
     PATH="/usr/local/cuda/bin:${PATH}"
 
-
 # ------------------------------------------------------------
-# Install build dependencies + CUDA 12.8 development toolchain
+# Build dependencies + minimal CUDA 12.8 dev toolchain
 # ------------------------------------------------------------
 
 RUN apt-get update \
@@ -44,22 +42,17 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         cuda-nvcc-12-8 \
         cuda-cudart-dev-12-8 \
-        libcublas-dev-12-8 \
         libcusparse-dev-12-8 \
-        libcusolver-dev-12-8 \
-        libcurand-dev-12-8 \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sfn /usr/local/cuda-12.8 /usr/local/cuda
 
-
 # ------------------------------------------------------------
-# Verify compiler + headers
+# Verify required compiler + headers
 # ------------------------------------------------------------
 
 RUN nvcc --version \
     && test -f /usr/include/python3.12/Python.h \
     && test -f /usr/local/cuda/include/cusparse.h
-
 
 # ------------------------------------------------------------
 # Update ComfyUI for Qwen Image 2.1
@@ -73,7 +66,6 @@ RUN git fetch --depth 1 origin tag v0.37.0 \
 RUN python -m pip install --no-cache-dir \
     -r /comfyui/requirements.txt
 
-
 # ------------------------------------------------------------
 # SageAttention build dependencies
 # ------------------------------------------------------------
@@ -84,10 +76,8 @@ RUN python -m pip install --no-cache-dir \
     wheel \
     setuptools
 
-
 # ------------------------------------------------------------
-# SageAttention 2++
-# RTX 4090 / Ada / SM89
+# SageAttention 2++ for RTX 4090 / SM89
 # ------------------------------------------------------------
 
 RUN git clone --depth 1 \
@@ -99,7 +89,6 @@ RUN git clone --depth 1 \
         --no-build-isolation \
         . \
     && rm -rf /tmp/SageAttention
-
 
 # ------------------------------------------------------------
 # Verify Torch / CUDA / SageAttention
@@ -115,25 +104,21 @@ print("CUDA available:", torch.cuda.is_available())
 print("SageAttention import successful")
 PY
 
-
 # ------------------------------------------------------------
 # Custom nodes
 # ------------------------------------------------------------
 
 WORKDIR /comfyui/custom_nodes
 
-
 # Sprite Maker
 RUN git clone --depth 1 \
     https://github.com/wpd-droid/sprite_maker_nodes.git \
     /comfyui/custom_nodes/sprite_maker_nodes
 
-
 # Attention Optimizer
 RUN git clone --depth 1 \
     https://github.com/D-Ogi/ComfyUI-Attention-Optimizer.git \
     /comfyui/custom_nodes/ComfyUI-Attention-Optimizer
-
 
 # ------------------------------------------------------------
 # Install custom-node requirements
@@ -147,16 +132,14 @@ RUN for d in /comfyui/custom_nodes/*; do \
       fi; \
     done
 
-
 # ------------------------------------------------------------
-# Verify Attention Optimizer is present
+# Verify Attention Optimizer
 # ------------------------------------------------------------
 
 RUN echo "Checking Attention Optimizer..." \
     && ls -lah /comfyui/custom_nodes/ComfyUI-Attention-Optimizer \
     && test -f /comfyui/custom_nodes/ComfyUI-Attention-Optimizer/__init__.py \
     && echo "Attention Optimizer files present"
-
 
 # ------------------------------------------------------------
 # Model directories
@@ -167,7 +150,6 @@ RUN mkdir -p \
     /comfyui/models/text_encoders \
     /comfyui/models/vae
 
-
 # ------------------------------------------------------------
 # Qwen Image 2.1 diffusion model
 # ------------------------------------------------------------
@@ -175,7 +157,6 @@ RUN mkdir -p \
 RUN wget -O \
     /comfyui/models/diffusion_models/qwen_image_2.1_int8_convrot.safetensors \
     "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_int8_convrot.safetensors"
-
 
 # ------------------------------------------------------------
 # Qwen3-VL text encoder
@@ -185,7 +166,6 @@ RUN wget -O \
     /comfyui/models/text_encoders/qwen3vl_8b_int8_convrot.safetensors \
     "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors"
 
-
 # ------------------------------------------------------------
 # Qwen Image 2.1 VAE
 # ------------------------------------------------------------
@@ -193,10 +173,5 @@ RUN wget -O \
 RUN wget -O \
     /comfyui/models/vae/qwen_image_2.1_vae_bf16.safetensors \
     "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors"
-
-
-# ------------------------------------------------------------
-# Final working directory
-# ------------------------------------------------------------
 
 WORKDIR /comfyui
