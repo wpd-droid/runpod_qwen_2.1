@@ -7,9 +7,45 @@ FROM runpod/worker-comfyui:5.10.0-base
 RUN mv /handler.py /worker_comfyui_handler.py
 COPY handler.py /handler.py
 
+
+# ------------------------------------------------------------
+# Environment
+# ------------------------------------------------------------
+
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_INPUT=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    CC=/usr/bin/gcc
+
+
+# ------------------------------------------------------------
+# Runtime/build utilities
+#
+# gcc + Python headers are required because SageAttention's
+# FP8 CUDA path uses Triton for Q/K quantization, and Triton
+# builds a small runtime module on first execution.
+#
+# We DO NOT need nvcc or the CUDA development toolkit.
+# ------------------------------------------------------------
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        gcc \
+        python3.12-dev \
+        git \
+        wget \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+
+# ------------------------------------------------------------
+# Verify C compiler / Python headers
+# ------------------------------------------------------------
+
+RUN command -v gcc \
+    && gcc --version \
+    && test -f /usr/include/python3.12/Python.h \
+    && echo "Triton runtime compiler requirements present"
 
 
 # ------------------------------------------------------------
@@ -26,12 +62,12 @@ RUN python -m pip install --no-cache-dir \
 
 
 # ------------------------------------------------------------
-# Verify the RunPod Torch / CUDA environment
+# Verify base runtime
 #
-# Expected:
-# Python 3.12
-# Torch 2.11.x
-# CUDA 12.8
+# SageAttention wheel below is specifically matched to:
+#   Python 3.12
+#   Torch 2.11
+#   CUDA 12.8
 # ------------------------------------------------------------
 
 RUN python - <<'PY'
@@ -56,21 +92,17 @@ PY
 
 
 # ------------------------------------------------------------
-# SageAttention 2.2.0
+# SageAttention 2.2
 #
 # IMPORTANT:
-# Do NOT compile SageAttention here.
+# Use a prebuilt SageAttention wheel.
+# Do NOT compile SageAttention from source.
 #
-# Astral publishes pre-built Linux wheels matched to:
-#   Python 3.12
-#   Torch 2.11
-#   CUDA 12.8
+# --only-binary prevents pip from silently falling back
+# to another source compilation.
 #
-# --only-binary prevents pip from falling back to another
-# source compilation if the requested wheel is unavailable.
-#
-# --no-deps prevents SageAttention from replacing our
-# working RunPod Torch installation.
+# --no-deps prevents it from replacing the RunPod
+# Torch installation.
 # ------------------------------------------------------------
 
 RUN python -m pip install \
@@ -82,7 +114,7 @@ RUN python -m pip install \
 
 
 # ------------------------------------------------------------
-# Verify SageAttention + Ada / SM89 extension
+# Verify SageAttention / Ada SM89 extension
 # ------------------------------------------------------------
 
 RUN python - <<'PY'
@@ -96,7 +128,7 @@ print("SageAttention:",
 print("Torch:", torch.__version__)
 print("Torch CUDA:", torch.version.cuda)
 
-# Make sure the compiled Ada extension is actually in the wheel.
+# RTX 4090 / Ada extension
 importlib.import_module("sageattention._qattn_sm89")
 
 print("SageAttention SM89 extension loaded successfully.")
@@ -147,6 +179,24 @@ RUN test -f \
 
 
 # ------------------------------------------------------------
+# Final dependency sanity check
+# ------------------------------------------------------------
+
+RUN python - <<'PY'
+import os
+import torch
+import sageattention
+import triton
+
+print("Torch:", torch.__version__)
+print("Torch CUDA:", torch.version.cuda)
+print("Triton:", triton.__version__)
+print("CC:", os.environ.get("CC"))
+print("SageAttention import: OK")
+PY
+
+
+# ------------------------------------------------------------
 # Model directories
 # ------------------------------------------------------------
 
@@ -182,5 +232,9 @@ RUN wget -O \
     /comfyui/models/vae/qwen_image_2.1_vae_bf16.safetensors \
     "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors"
 
+
+# ------------------------------------------------------------
+# Final working directory
+# ------------------------------------------------------------
 
 WORKDIR /comfyui
