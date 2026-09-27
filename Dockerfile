@@ -11,48 +11,6 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_INPUT=1 \
     PYTHONUNBUFFERED=1
 
-# ------------------------------------------------------------
-# RTX 4090 / Ada compile settings
-# ------------------------------------------------------------
-
-ENV TORCH_CUDA_ARCH_LIST="8.9" \
-    EXT_PARALLEL=4 \
-    MAX_JOBS=8 \
-    NVCC_APPEND_FLAGS="--threads 8" \
-    CUDA_HOME="/usr/local/cuda" \
-    PATH="/usr/local/cuda/bin:${PATH}"
-
-# ------------------------------------------------------------
-# Build dependencies + minimal CUDA 12.8 dev toolchain
-# ------------------------------------------------------------
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        wget \
-        gnupg \
-        ca-certificates \
-        git \
-        build-essential \
-        python3.12-dev \
-    && wget -qO /usr/share/keyrings/cuda-archive-keyring.gpg \
-        https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-archive-keyring.gpg \
-    && echo "deb [signed-by=/usr/share/keyrings/cuda-archive-keyring.gpg] https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/ /" \
-        > /etc/apt/sources.list.d/cuda.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-        cuda-nvcc-12-8 \
-        cuda-cudart-dev-12-8 \
-        libcusparse-dev-12-8 \
-    && rm -rf /var/lib/apt/lists/* \
-    && ln -sfn /usr/local/cuda-12.8 /usr/local/cuda
-
-# ------------------------------------------------------------
-# Verify required compiler + headers
-# ------------------------------------------------------------
-
-RUN nvcc --version \
-    && test -f /usr/include/python3.12/Python.h \
-    && test -f /usr/local/cuda/include/cusparse.h
 
 # ------------------------------------------------------------
 # Update ComfyUI for Qwen Image 2.1
@@ -66,43 +24,84 @@ RUN git fetch --depth 1 origin tag v0.37.0 \
 RUN python -m pip install --no-cache-dir \
     -r /comfyui/requirements.txt
 
-# ------------------------------------------------------------
-# SageAttention build dependencies
-# ------------------------------------------------------------
-
-RUN python -m pip install --no-cache-dir \
-    ninja \
-    packaging \
-    wheel \
-    setuptools
 
 # ------------------------------------------------------------
-# SageAttention 2++ for RTX 4090 / SM89
-# ------------------------------------------------------------
-
-RUN git clone --depth 1 \
-        https://github.com/thu-ml/SageAttention.git \
-        /tmp/SageAttention \
-    && cd /tmp/SageAttention \
-    && python -m pip install \
-        --no-cache-dir \
-        --no-build-isolation \
-        . \
-    && rm -rf /tmp/SageAttention
-
-# ------------------------------------------------------------
-# Verify Torch / CUDA / SageAttention
+# Verify the RunPod Torch / CUDA environment
+#
+# Expected:
+# Python 3.12
+# Torch 2.11.x
+# CUDA 12.8
 # ------------------------------------------------------------
 
 RUN python - <<'PY'
+import sys
+import torch
+
+print("Python:", sys.version)
+print("Torch:", torch.__version__)
+print("Torch CUDA:", torch.version.cuda)
+
+assert sys.version_info[:2] == (3, 12), \
+    f"Expected Python 3.12, got {sys.version}"
+
+assert torch.__version__.startswith("2.11."), \
+    f"Expected Torch 2.11.x, got {torch.__version__}"
+
+assert torch.version.cuda == "12.8", \
+    f"Expected CUDA 12.8 Torch build, got {torch.version.cuda}"
+
+print("Runtime matches SageAttention wheel target.")
+PY
+
+
+# ------------------------------------------------------------
+# SageAttention 2.2.0
+#
+# IMPORTANT:
+# Do NOT compile SageAttention here.
+#
+# Astral publishes pre-built Linux wheels matched to:
+#   Python 3.12
+#   Torch 2.11
+#   CUDA 12.8
+#
+# --only-binary prevents pip from falling back to another
+# source compilation if the requested wheel is unavailable.
+#
+# --no-deps prevents SageAttention from replacing our
+# working RunPod Torch installation.
+# ------------------------------------------------------------
+
+RUN python -m pip install \
+    --no-cache-dir \
+    --no-deps \
+    --only-binary=:all: \
+    --index-url https://wheels.astral.sh/simple/cu128/ \
+    "sageattention==2.2.0+cu.12.8.torch.2.11"
+
+
+# ------------------------------------------------------------
+# Verify SageAttention + Ada / SM89 extension
+# ------------------------------------------------------------
+
+RUN python - <<'PY'
+import importlib
+import importlib.metadata
 import torch
 import sageattention
 
+print("SageAttention:",
+      importlib.metadata.version("sageattention"))
 print("Torch:", torch.__version__)
 print("Torch CUDA:", torch.version.cuda)
-print("CUDA available:", torch.cuda.is_available())
-print("SageAttention import successful")
+
+# Make sure the compiled Ada extension is actually in the wheel.
+importlib.import_module("sageattention._qattn_sm89")
+
+print("SageAttention SM89 extension loaded successfully.")
 PY
+
 
 # ------------------------------------------------------------
 # Custom nodes
@@ -110,15 +109,18 @@ PY
 
 WORKDIR /comfyui/custom_nodes
 
+
 # Sprite Maker
 RUN git clone --depth 1 \
     https://github.com/wpd-droid/sprite_maker_nodes.git \
     /comfyui/custom_nodes/sprite_maker_nodes
 
+
 # Attention Optimizer
 RUN git clone --depth 1 \
     https://github.com/D-Ogi/ComfyUI-Attention-Optimizer.git \
     /comfyui/custom_nodes/ComfyUI-Attention-Optimizer
+
 
 # ------------------------------------------------------------
 # Install custom-node requirements
@@ -132,14 +134,17 @@ RUN for d in /comfyui/custom_nodes/*; do \
       fi; \
     done
 
+
 # ------------------------------------------------------------
 # Verify Attention Optimizer
 # ------------------------------------------------------------
 
-RUN echo "Checking Attention Optimizer..." \
-    && ls -lah /comfyui/custom_nodes/ComfyUI-Attention-Optimizer \
-    && test -f /comfyui/custom_nodes/ComfyUI-Attention-Optimizer/__init__.py \
-    && echo "Attention Optimizer files present"
+RUN test -f \
+      /comfyui/custom_nodes/ComfyUI-Attention-Optimizer/__init__.py \
+    && test -f \
+      /comfyui/custom_nodes/ComfyUI-Attention-Optimizer/nodes.py \
+    && echo "Attention Optimizer installed successfully"
+
 
 # ------------------------------------------------------------
 # Model directories
@@ -150,6 +155,7 @@ RUN mkdir -p \
     /comfyui/models/text_encoders \
     /comfyui/models/vae
 
+
 # ------------------------------------------------------------
 # Qwen Image 2.1 diffusion model
 # ------------------------------------------------------------
@@ -157,6 +163,7 @@ RUN mkdir -p \
 RUN wget -O \
     /comfyui/models/diffusion_models/qwen_image_2.1_int8_convrot.safetensors \
     "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_int8_convrot.safetensors"
+
 
 # ------------------------------------------------------------
 # Qwen3-VL text encoder
@@ -166,6 +173,7 @@ RUN wget -O \
     /comfyui/models/text_encoders/qwen3vl_8b_int8_convrot.safetensors \
     "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors"
 
+
 # ------------------------------------------------------------
 # Qwen Image 2.1 VAE
 # ------------------------------------------------------------
@@ -173,5 +181,6 @@ RUN wget -O \
 RUN wget -O \
     /comfyui/models/vae/qwen_image_2.1_vae_bf16.safetensors \
     "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors"
+
 
 WORKDIR /comfyui
