@@ -25,10 +25,7 @@ ENV TORCH_CUDA_ARCH_LIST="8.9" \
 
 
 # ------------------------------------------------------------
-# Install CUDA 12.8 compiler toolchain
-#
-# The RunPod base includes CUDA runtime support but not nvcc.
-# SageAttention requires nvcc to build its CUDA extensions.
+# Install build dependencies + CUDA 12.8 development toolchain
 # ------------------------------------------------------------
 
 RUN apt-get update \
@@ -37,6 +34,8 @@ RUN apt-get update \
         gnupg \
         ca-certificates \
         git \
+        build-essential \
+        python3.12-dev \
     && wget -qO /usr/share/keyrings/cuda-archive-keyring.gpg \
         https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-archive-keyring.gpg \
     && echo "deb [signed-by=/usr/share/keyrings/cuda-archive-keyring.gpg] https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/ /" \
@@ -45,10 +44,21 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         cuda-nvcc-12-8 \
         cuda-cudart-dev-12-8 \
+        cuda-cublas-dev-12-8 \
+        cuda-cusparse-dev-12-8 \
+        cuda-cusolver-dev-12-8 \
+        cuda-curand-dev-12-8 \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sfn /usr/local/cuda-12.8 /usr/local/cuda
 
-RUN nvcc --version
+
+# ------------------------------------------------------------
+# Verify compiler + headers
+# ------------------------------------------------------------
+
+RUN nvcc --version \
+    && test -f /usr/include/python3.12/Python.h \
+    && test -f /usr/local/cuda/include/cusparse.h
 
 
 # ------------------------------------------------------------
@@ -77,8 +87,7 @@ RUN python -m pip install --no-cache-dir \
 
 # ------------------------------------------------------------
 # SageAttention 2++
-#
-# Build directly from upstream source for RTX 4090 / SM89.
+# RTX 4090 / Ada / SM89
 # ------------------------------------------------------------
 
 RUN git clone --depth 1 \
