@@ -11,8 +11,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_INPUT=1 \
     PYTHONUNBUFFERED=1
 
+
 # ------------------------------------------------------------
-# RTX 4090 / Ada settings
+# RTX 4090 / Ada compile settings
 # ------------------------------------------------------------
 
 ENV TORCH_CUDA_ARCH_LIST="8.9" \
@@ -22,10 +23,12 @@ ENV TORCH_CUDA_ARCH_LIST="8.9" \
     CUDA_HOME="/usr/local/cuda" \
     PATH="/usr/local/cuda/bin:${PATH}"
 
+
 # ------------------------------------------------------------
-# Install CUDA 12.8 compiler
+# Install CUDA 12.8 compiler toolchain
 #
-# Base image contains CUDA runtime libraries but not nvcc.
+# The RunPod base includes CUDA runtime support but not nvcc.
+# SageAttention requires nvcc to build its CUDA extensions.
 # ------------------------------------------------------------
 
 RUN apt-get update \
@@ -33,6 +36,7 @@ RUN apt-get update \
         wget \
         gnupg \
         ca-certificates \
+        git \
     && wget -qO /usr/share/keyrings/cuda-archive-keyring.gpg \
         https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-archive-keyring.gpg \
     && echo "deb [signed-by=/usr/share/keyrings/cuda-archive-keyring.gpg] https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/ /" \
@@ -44,7 +48,6 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sfn /usr/local/cuda-12.8 /usr/local/cuda
 
-# Verify CUDA compiler exists
 RUN nvcc --version
 
 
@@ -62,7 +65,7 @@ RUN python -m pip install --no-cache-dir \
 
 
 # ------------------------------------------------------------
-# SageAttention build dependencies
+# Build dependencies for SageAttention
 # ------------------------------------------------------------
 
 RUN python -m pip install --no-cache-dir \
@@ -74,7 +77,8 @@ RUN python -m pip install --no-cache-dir \
 
 # ------------------------------------------------------------
 # SageAttention 2++
-# RTX 4090 = sm_89
+#
+# Build directly from upstream source for RTX 4090 / SM89.
 # ------------------------------------------------------------
 
 RUN git clone --depth 1 \
@@ -89,7 +93,7 @@ RUN git clone --depth 1 \
 
 
 # ------------------------------------------------------------
-# Verify SageAttention
+# Verify Torch / CUDA / SageAttention
 # ------------------------------------------------------------
 
 RUN python - <<'PY'
@@ -98,6 +102,7 @@ import sageattention
 
 print("Torch:", torch.__version__)
 print("Torch CUDA:", torch.version.cuda)
+print("CUDA available:", torch.cuda.is_available())
 print("SageAttention import successful")
 PY
 
@@ -108,13 +113,17 @@ PY
 
 WORKDIR /comfyui/custom_nodes
 
+
 # Sprite Maker
 RUN git clone --depth 1 \
-    https://github.com/wpd-droid/sprite_maker_nodes.git
+    https://github.com/wpd-droid/sprite_maker_nodes.git \
+    /comfyui/custom_nodes/sprite_maker_nodes
+
 
 # Attention Optimizer
 RUN git clone --depth 1 \
-    https://github.com/D-Ogi/ComfyUI-Attention-Optimizer.git
+    https://github.com/D-Ogi/ComfyUI-Attention-Optimizer.git \
+    /comfyui/custom_nodes/ComfyUI-Attention-Optimizer
 
 
 # ------------------------------------------------------------
@@ -128,6 +137,16 @@ RUN for d in /comfyui/custom_nodes/*; do \
           -r "$d/requirements.txt"; \
       fi; \
     done
+
+
+# ------------------------------------------------------------
+# Verify Attention Optimizer is present
+# ------------------------------------------------------------
+
+RUN echo "Checking Attention Optimizer..." \
+    && ls -lah /comfyui/custom_nodes/ComfyUI-Attention-Optimizer \
+    && test -f /comfyui/custom_nodes/ComfyUI-Attention-Optimizer/__init__.py \
+    && echo "Attention Optimizer files present"
 
 
 # ------------------------------------------------------------
@@ -166,5 +185,9 @@ RUN wget -O \
     /comfyui/models/vae/qwen_image_2.1_vae_bf16.safetensors \
     "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors"
 
+
+# ------------------------------------------------------------
+# Final working directory
+# ------------------------------------------------------------
 
 WORKDIR /comfyui
