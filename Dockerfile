@@ -44,10 +44,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         cuda-nvcc-12-8 \
         cuda-cudart-dev-12-8 \
-        cuda-cublas-dev-12-8 \
-        cuda-cusparse-dev-12-8 \
-        cuda-cusolver-dev-12-8 \
-        cuda-curand-dev-12-8 \
+        libcublas-dev-12-8 \
+        libcusparse-dev-12-8 \
+        libcusolver-dev-12-8 \
+        libcurand-dev-12-8 \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sfn /usr/local/cuda-12.8 /usr/local/cuda
 
@@ -75,7 +75,7 @@ RUN python -m pip install --no-cache-dir \
 
 
 # ------------------------------------------------------------
-# Build dependencies for SageAttention
+# SageAttention build dependencies
 # ------------------------------------------------------------
 
 RUN python -m pip install --no-cache-dir \
